@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPS SPACE DEFENDERS</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: linear-gradient(to bottom, #000428, #004e92);
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      display: block;
+    }
+    .ui {
+      position: absolute;
+      font-family: Arial, sans-serif;
+      color: #ffffff;
+      z-index: 10;
+    }
+    .score, .highscore, .hits {
+      top: 10px;
+      font-size: 18px;
+    }
+    .score {
+      left: 10px;
+    }
+    .highscore {
+      right: 10px;
+    }
+    .hits {
+      left: 50%;
+      transform: translateX(-50%);
+    }
+    .game-over {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: white;
+      font-size: 2rem;
+      display: none;
+    }
+    #restartButton {
+      display: none;
+      position: absolute;
+      top: 60%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #ff5e57;
+      color: #fff;
+      padding: 10px 20px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #restartButton:hover {
+      background: #d94338;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div class="ui score">Score: <span id="scoreDisplay">0</span></div>
+  <div class="ui highscore">High Score: <span id="highScoreDisplay">0</span></div>
+  <div class="ui hits">Hits: <span id="hitsDisplay">3</span></div>
+  <div id="gameOverText" class="game-over">Game Over!</div>
+  <button id="restartButton" onclick="restartGame()">Restart</button>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const highScoreDisplay = document.getElementById('highScoreDisplay');
+    const hitsDisplay = document.getElementById('hitsDisplay');
+    const gameOverText = document.getElementById('gameOverText');
+    const restartButton = document.getElementById('restartButton');
+
+    let gameRunning = true;
+    let score = 0;
+    let highScore = localStorage.getItem('highScore') || 0;
+    let hits = 3;
+
+    highScoreDisplay.textContent = highScore;
+
+    const gameState = {
+      player: { x: 0, y: 0, width: 80, height: 40, speed: 7, dx: 0 },
+      rocks: [],
+      coins: [],
+      rockSpeed: 4,
+      coinSpeed: 3,
+      difficulty: 0.02, // Difficulty increases as rocks spawn faster
+    };
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      // Center UFO
+      gameState.player.x = canvas.width / 2 - gameState.player.width / 2;
+      gameState.player.y = canvas.height - gameState.player.height - 20;
+    }
+
+    function spawnRock() {
+      const size = Math.random() * 50 + 20;
+      const x = Math.random() * (canvas.width - size);
+      gameState.rocks.push({ x, y: -size, width: size, height: size });
+    }
+
+    function spawnCoin() {
+      const size = 20;
+      const x = Math.random() * (canvas.width - size);
+      gameState.coins.push({ x, y: -size, width: size, height: size });
+    }
+
+    function drawUFO() {
+      const { x, y, width, height } = gameState.player;
+
+      // Body
+      ctx.fillStyle = '#60a5fa'; // Light blue base
+      ctx.beginPath();
+      ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Dome
+      ctx.fillStyle = '#a3e635'; // Green dome
+      ctx.beginPath();
+      ctx.ellipse(x + width / 2, y, width / 3, height / 3, 0, Math.PI, 0);
+      ctx.fill();
+
+      // Lights
+      const lightColors = ['#ff3e4d', '#ffeb3b', '#3efc3b'];
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = lightColors[i % lightColors.length];
+        ctx.beginPath();
+        ctx.arc(
+          x + (width / 5) * (i + 0.5),
+          y + height / 1.5,
+          width / 10,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+    }
+
+    function updateGame(deltaTime) {
+      if (!gameRunning) return;
+
+      // Move UFO
+      gameState.player.x += gameState.player.dx * (deltaTime / 16);
+
+      // Boundary check
+      if (gameState.player.x < 0) gameState.player.x = 0;
+      if (gameState.player.x + gameState.player.width > canvas.width)
+        gameState.player.x = canvas.width - gameState.player.width;
+
+      // Move rocks
+      gameState.rocks.forEach((rock, index) => {
+        rock.y += gameState.rockSpeed * (deltaTime / 16);
+        if (rock.y > canvas.height) {
+          gameState.rocks.splice(index, 1);
+        }
+
+        // Collision detection
+        if (
+          rock.x < gameState.player.x + gameState.player.width &&
+          rock.x + rock.width > gameState.player.x &&
+          rock.y < gameState.player.y + gameState.player.height &&
+          rock.y + rock.height > gameState.player.y
+        ) {
+          gameState.rocks.splice(index, 1);
+          hits--;
+          hitsDisplay.textContent = hits;
+          if (hits <= 0) endGame();
+        }
+      });
+
+      // Move coins
+      gameState.coins.forEach((coin, index) => {
+        coin.y += gameState.coinSpeed * (deltaTime / 16);
+        if (coin.y > canvas.height) {
+          gameState.coins.splice(index, 1);
+        }
+
+        // Coin collection
+        if (
+          coin.x < gameState.player.x + gameState.player.width &&
+          coin.x + coin.width > gameState.player.x &&
+          coin.y < gameState.player.y + gameState.player.height &&
+          coin.y + coin.height > gameState.player.y
+        ) {
+          gameState.coins.splice(index, 1);
+          score += 5;
+          scoreDisplay.textContent = score;
+        }
+      });
+
+      // Spawn new objects
+      if (Math.random() < gameState.difficulty) spawnRock();
+      if (Math.random() < 0.01) spawnCoin();
+
+      // Increase speed based on score
+      gameState.rockSpeed = 4 + score * 0.1;
+    }
+
+    function drawGame() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw UFO
+      drawUFO();
+
+      // Draw rocks
+      ctx.fillStyle = '#9ca3af'; // Grey rocks
+      gameState.rocks.forEach((rock) => {
+        ctx.fillRect(rock.x, rock.y, rock.width, rock.height);
+      });
+
+      // Draw coins
+      ctx.fillStyle = '#ffd700'; // Gold coins
+      gameState.coins.forEach((coin) => {
+        ctx.beginPath();
+        ctx.arc(coin.x + coin.width / 2, coin.y + coin.height / 2, coin.width / 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    function endGame() {
+      gameRunning = false;
+      gameOverText.style.display = 'block';
+      restartButton.style.display = 'block';
+
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('highScore', highScore);
+        highScoreDisplay.textContent = highScore;
+      }
+    }
+
+    function restartGame() {
+      score = 0;
+      hits = 3;
+      scoreDisplay.textContent = score;
+      hitsDisplay.textContent = hits;
+      gameState.rocks = [];
+      gameState.coins = [];
+      gameRunning = true;
+      gameOverText.style.display = 'none';
+      restartButton.style.display = 'none';
+      lastTimestamp = 0;
+      requestAnimationFrame(gameLoop);
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') gameState.player.dx = -1 * gameState.player.speed;
+      if (e.key === 'ArrowRight') gameState.player.dx = gameState.player.speed;
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') gameState.player.dx = 0;
+    });
+
+    let lastTimestamp = 0;
+    function gameLoop(timestamp) {
+      const deltaTime = timestamp - lastTimestamp;
+      lastTimestamp = timestamp;
+
+      updateGame(deltaTime);
+      drawGame();
+
+      if (gameRunning) {
+        requestAnimationFrame(gameLoop);
+      }
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
